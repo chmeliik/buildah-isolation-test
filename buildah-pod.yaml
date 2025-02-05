@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  generateName: buildah-
+  labels:
+    buildah-isolation-test: "true"
+  annotations:
+    # /dev/fuse fixes:
+    #
+    # fuse: device not found, try 'modprobe fuse' first
+    #
+    # Wouldn't be needed with STORAGE_DRIVER=vfs
+    io.kubernetes.cri-o.Devices: /dev/fuse
+spec:
+  restartPolicy: Never
+  volumes:
+    - name: workdir
+      emptyDir: {}
+
+  initContainers:
+    - name: create-dockerfile
+      image: quay.io/containers/buildah:v1.38.1
+      volumeMounts:
+        - name: workdir
+          mountPath: /workdir
+      workingDir: /workdir
+      command: ["bash", "-c"]
+      args:
+        - |-
+          cat << EOF > Dockerfile
+          FROM docker.io/library/alpine:latest
+
+          RUN echo "hello world"
+          EOF
+
+  containers:
+    - name: buildah
+      image: quay.io/containers/buildah:v1.38.1
+      volumeMounts:
+        - name: workdir
+          mountPath: /workdir
+      workingDir: /workdir
+      env:
+        - name: BUILDAH_ISOLATION
+          value: oci
+        - name: STORAGE_DRIVER
+          value: overlay
+      command: ["bash", "-c"]
+      # unshare fixes:
+      #
+      # error running container: from /usr/bin/crun ... opening file `/sys/fs/cgroup/cgroup.subtree_control` for writing: Read-only file system
+      #
+      # --mount fixes:
+      #
+      # Error: mount /var/lib/containers/storage/overlay:/var/lib/containers/storage/overlay, flags: 0x1000: operation not permitted
+      #
+      # --map-root-user fixes:
+      #
+      # unshare: unshare failed: Operation not permitted
+
+      # --net=host fixes:
+      #
+      # error running container: from /usr/bin/crun ...: open `/proc/sys/net/ipv4/ping_group_range`: Read-only file system
+      #
+      # --pid=host fixes:
+      #
+      # error running container: from /usr/bin/crun ...: mount `proc` to `proc`: Operation not permitted
+      args:
+        - |-
+          # can also add --pid --fork to unshare
+          unshare --map-root-user --mount -- buildah build --net=host --pid=host .
+      securityContext:
+        capabilities:
+          add:
+            # SETFCAP fixes:
+            #
+            # unshare: write failed /proc/self/uid_map: Operation not permitted
+            - SETFCAP
+        seLinuxOptions:
+          # container_runtime_t fixes:
+          #
+          # error running container: from /usr/bin/crun ...: mount `devpts` to `dev/pts`: Permission denied
+          type: container_runtime_t
