@@ -4,17 +4,12 @@ metadata:
   generateName: buildah-
   labels:
     buildah-isolation-test: "true"
-  annotations:
-    # /dev/fuse fixes:
-    #
-    # fuse: device not found, try 'modprobe fuse' first
-    #
-    # Wouldn't be needed with STORAGE_DRIVER=vfs
-    io.kubernetes.cri-o.Devices: /dev/fuse
 spec:
   restartPolicy: Never
   volumes:
     - name: workdir
+      emptyDir: {}
+    - name: var-lib-containers
       emptyDir: {}
 
   # adds an important layer of security, see https://kubernetes.io/blog/2024/04/22/userns-beta/
@@ -42,6 +37,10 @@ spec:
       volumeMounts:
         - name: workdir
           mountPath: /workdir
+        # need to mount an emptyDir at /var/lib/containers to make
+        # STORAGE_DRIVER=overlay work without having to mount /dev/fuse
+        - name: var-lib-containers
+          mountPath: /var/lib/containers
       workingDir: /workdir
       env:
         - name: BUILDAH_ISOLATION
@@ -70,6 +69,15 @@ spec:
       # error running container: from /usr/bin/crun ...: mount `proc` to `proc`: Operation not permitted
       args:
         - |-
+          # Need to unset mount_program to let buildah use the kernel-native overlay
+          # implementation and avoid having to mount /dev/fuse.
+          # And also remove the fsync=0 argument, which doesn't apply without
+          # mount_program = "/usr/bin/fuse-overlayfs"
+          sed \
+            -e 's/^mount_program/#mount_program/' \
+            -e 's/,fsync=0//' \
+            -i /etc/containers/storage.conf
+
           # can also add --pid --fork to unshare
           unshare --map-root-user --mount -- buildah build --net=host --pid=host .
       securityContext:
