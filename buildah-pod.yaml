@@ -17,6 +17,9 @@ spec:
     - name: workdir
       emptyDir: {}
 
+  # adds an important layer of security, see https://kubernetes.io/blog/2024/04/22/userns-beta/
+  hostUsers: false
+
   initContainers:
     - name: create-dockerfile
       image: quay.io/containers/buildah:v1.38.1
