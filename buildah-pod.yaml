@@ -25,10 +25,35 @@ spec:
       command: ["bash", "-c"]
       args:
         - |-
-          cat << EOF > Dockerfile
-          FROM docker.io/library/alpine:latest
+          cat << EOF > Containerfile
+          FROM registry.access.redhat.com/ubi9/ubi:latest@sha256:53d6c19d664f4f418ce5c823d3a33dbb562a2550ea249cf07ef10aa063ace38f as builder
+          RUN dnf -y install golang git-core
 
-          RUN echo "hello world"
+          WORKDIR /go/src/mikefarah/yq
+
+          RUN git clone https://github.com/mikefarah/yq .
+
+          RUN CGO_ENABLED=0 GOTOOLCHAIN=auto GOSUMDB=sum.golang.org go build -ldflags "-s -w" .
+
+          RUN ./scripts/acceptance.sh
+
+          # Rebase on ubi9
+          FROM registry.access.redhat.com/ubi9/ubi:latest@sha256:53d6c19d664f4f418ce5c823d3a33dbb562a2550ea249cf07ef10aa063ace38f
+          RUN dnf -y install gettext
+
+          COPY --from=builder /go/src/mikefarah/yq/yq /usr/bin/yq
+
+          WORKDIR /workdir
+
+          RUN \
+            groupadd -g 1000 yq; \
+            useradd -u 1000 -g yq -s /bin/sh -d /home/yq yq
+
+          RUN chown -R yq:yq /workdir
+
+          USER yq
+
+          ENTRYPOINT ["/usr/bin/yq"]
           EOF
 
   containers:
@@ -59,6 +84,10 @@ spec:
       # --map-root-user fixes:
       #
       # unshare: unshare failed: Operation not permitted
+      #
+      # --map-users + --map-groups fixes:
+      #
+      # potentially insufficient UIDs or GIDs available in user namespace
 
       # --net=host fixes:
       #
@@ -78,8 +107,7 @@ spec:
             -e 's/,fsync=0//' \
             -i /etc/containers/storage.conf
 
-          # can also add --pid --fork to unshare
-          unshare --map-root-user --mount -- buildah build --net=host --pid=host .
+          unshare --map-root-user --mount --map-users 1,1,65536 --map-groups 1,1,65536 -- buildah build --net=host --pid=host .
       securityContext:
         capabilities:
           add:
