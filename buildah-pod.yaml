@@ -12,8 +12,10 @@ spec:
     - name: var-lib-containers
       emptyDir: {}
 
-  # adds an important layer of security, see https://kubernetes.io/blog/2024/04/22/userns-beta/
-  hostUsers: false
+  # Adds an important layer of security, see https://kubernetes.io/blog/2024/04/22/userns-beta/
+  # Or *would* add, if the cluster actually supports user namespaces. Turns out this setting hasn't
+  # taken effect in any of my tests yet.
+  #hostUsers: false
 
   initContainers:
     - name: create-dockerfile
